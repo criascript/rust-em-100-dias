@@ -29,9 +29,7 @@ fn parse_count(data: &str) -> f64 {
 fn main() {
     let username = "criascript";
     let url: String = format!("https://www.tiktok.com/@{}?lang=pt-BR", username);
-
     let response = reqwest::blocking::get(url).unwrap().text().unwrap();
-
     let document = Html::parse_document(&response);
 
     let binding_following_count = Selector::parse("strong[data-e2e=\"following-count\"]").unwrap();
