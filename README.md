@@ -26,5 +26,5 @@ members = [
 ### Criar novos dias 
 
 ```bash
-cargo new "Dia xx"
+cargo new "Dia-xx"
 ```
