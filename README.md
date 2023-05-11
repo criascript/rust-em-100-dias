@@ -18,13 +18,13 @@ e depois adicionar os projetos no arquivo `Cargo.toml`:
 
 [[workspaces]]
 members = [
-    "Dia 01",
-    "Dia 02",
+    "dia_01",
+    "dia_02",
 ]
 ```
 
 ### Criar novos dias 
 
 ```bash
-cargo new "Dia-xx"
+cargo new "dia_xx"
 ```
