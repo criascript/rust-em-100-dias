@@ -1,4 +1,4 @@
-# ** Dia 02 - Rust em 100 dias**
+# **Dia 02 - Rust em 100 dias**
 
 ## O que aprendi hoje?
 
