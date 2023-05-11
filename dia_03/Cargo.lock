@@ -140,6 +140,7 @@ dependencies = [
  "regex",
  "reqwest",
  "scraper",
+ "serde_json",
 ]
 
 [[package]]
