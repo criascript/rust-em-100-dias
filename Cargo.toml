@@ -6,10 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[workspaces]]
-members = [
-    "dia_01",
-    "dia_02",
-    "dia_03",
-]
+members = ["dia_01", "dia_02", "dia_03"]
 
 [dependencies]
+dia_01 = { path = "dia_01" }
+dia_02 = { path = "dia_02" }
+dia_03 = { path = "dia_03" }

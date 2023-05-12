@@ -7,6 +7,10 @@ edition = "2021"
 
 [dependencies]
 regex = "1.8.1"
-reqwest = {version="0.11.17", features = ["blocking"]}
+reqwest = { version = "0.11.17", features = ["blocking"] }
 scraper = "0.16.0"
+serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"
+thiserror = "1.0.40"
+skyscraper = "0.4.0"
+chrono = { version = "0.4.24", features = ["serde"] }

@@ -1,78 +1,128 @@
-#![allow(unused_imports)]
-use regex::Regex;
-use reqwest::blocking::get;
-use scraper::{Html, Selector};
-use serde_json::json;
+pub mod traits;
 
+use std::{
+    collections::{BTreeMap, HashMap},
+    io::Write,
+};
 
-fn parse_count(data: &str) -> f64 {
-    let re_k: Regex = Regex::new(r#"^\d+(\.\d+)?[Kk]$"#).unwrap();
-    let re_m: Regex = Regex::new(r#"^\d+(\.\d+)?[Mm]$"#).unwrap();
+use chrono::{DateTime, TimeZone};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use skyscraper::{html, xpath};
+use traits::{GetFirstNode, ParseJson};
 
-    if re_k.is_match(data) {
-        let num: &str = data.trim_end_matches(|c| c == 'K' || c == 'k');
-        return num.parse::<f64>().unwrap_or(0.0) * 1000.0;
+const USERNAME: &str = "criascript";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TikTokData {
+    following_count: i64,
+    follower_count: i64,
+    like_count: i64,
+    play_count: i64,
+    play_average: f64,
+    comment_count: i64,
+    videos: BTreeMap<String, Video>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum TikTokError {
+    #[error("html parse error: {0}")]
+    HtmlParse(#[from] html::parse::ParseError),
+
+    #[error("xpath parse error: {0}")]
+    XpathParse(#[from] xpath::parse::ParseError),
+
+    #[error("reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("apply error: {0}")]
+    Apply(#[from] xpath::ApplyError),
+
+    #[error("serde json error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+
+    #[error("std io error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("custom error: {0}")]
+    Custom(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Video {
+    desc: String,
+    play_count: i64,
+    heart_count: i64,
+    comment_count: i64,
+    create_time: DateTime<chrono::Utc>,
+}
+
+type UserData = HashMap<String, HashMap<String, Value>>;
+
+fn get_videos(user_data: &UserData) -> Option<BTreeMap<String, Video>> {
+    let mut videos = BTreeMap::new();
+    for (id, video) in user_data.get("ItemModule")? {
+        let video = video.as_object()?;
+        let stats = video.get("stats")?;
+        videos.insert(
+            id.to_string(),
+            Video {
+                desc: video.get("desc")?.as_str()?.to_string(),
+                play_count: stats.get("playCount")?.as_i64()?,
+                heart_count: stats.get("diggCount")?.as_i64()?,
+                comment_count: stats.get("commentCount")?.as_i64()?,
+                create_time: chrono::Utc
+                    .timestamp_opt(video.get("createTime")?.as_str()?.parse().ok()?, 0)
+                    .single()?,
+            },
+        );
     }
 
-    if re_m.is_match(data) {
-        let num: &str = data.trim_end_matches(|c| c == 'M' || c == 'm');
-        return num.parse::<f64>().unwrap_or(0.0) * 1000000.0;
-    }
+    Some(videos)
+}
 
-    data.parse::<f64>().unwrap_or(0.0)
+fn parse_user_data(user_data: UserData) -> Option<TikTokData> {
+    let videos = get_videos(&user_data)?;
+
+    let user_stats = user_data
+        .get("UserModule")?
+        .get("stats")?
+        .as_object()?
+        .get(USERNAME)?
+        .as_object()?;
+
+    Some(TikTokData {
+        following_count: user_stats.get("followingCount")?.as_i64()?,
+        follower_count: user_stats.get("followerCount")?.as_i64()?,
+        like_count: user_stats.get("heartCount")?.as_i64()?,
+        play_count: videos.values().map(|v| v.play_count).sum(),
+        play_average: videos.values().map(|v| v.play_count).sum::<i64>() as f64
+            / videos.len() as f64,
+        comment_count: videos.values().map(|v| v.comment_count).sum(),
+        videos,
+    })
+}
+
+fn get_tiktok_data() -> Result<(), TikTokError> {
+    let url: String = format!("https://www.tiktok.com/@{USERNAME}?lang=pt-BR");
+    let response: String = reqwest::blocking::get(url)?.text()?;
+    let doc = html::parse(&response)?;
+    let user_data = xpath::parse(r#"//script[@id="SIGI_STATE"]"#)?
+        .get_first_text(&doc)
+        .ok_or_else(|| TikTokError::Custom("no data found".to_string()))?
+        .parse_json()?;
+
+    std::fs::File::create("raw.json")?
+        .write_all(serde_json::to_string_pretty(&user_data)?.as_bytes())?;
+
+    let tiktok_data = parse_user_data(user_data)
+        .ok_or_else(|| TikTokError::Custom("no data found".to_string()))?;
+
+    std::fs::File::create("data.json")?
+        .write_all(serde_json::to_string_pretty(&tiktok_data)?.as_bytes())?;
+    Ok(())
 }
 
 fn main() {
-    let username: &str = "criascript";
-    let url: String = format!("https://www.tiktok.com/@{}?lang=pt-BR", username);
-    let response: String = reqwest::blocking::get(url).unwrap().text().unwrap();
-    let document: Html = Html::parse_document(&response);
-
-    let binding_following_count: Selector = Selector::parse("strong[data-e2e=\"following-count\"]").unwrap();
-    let binding_followers_count: Selector = Selector::parse("strong[data-e2e=\"followers-count\"]").unwrap();
-    let binding_likes_count: Selector = Selector::parse("strong[data-e2e=\"likes-count\"]").unwrap();
-    let binding_views_count = Selector::parse("strong.video-count[data-e2e=video-views]").unwrap();
-    let binding_user_title_posts = Selector::parse("[data-e2e=\"user-post-item-desc\"]").unwrap();
-    
-    let views: Vec<scraper::element_ref::ElementRef> = document.select(&binding_views_count).collect();
-    let views_values: Vec<i32> = views.iter().map(|view| {
-        let view_str: String = view.text().collect::<String>();
-        parse_count(&view_str).round() as i32
-    }).collect();
-    let views_sum: i32 = views_values.iter().sum();
-    
-    let posts: Vec<scraper::element_ref::ElementRef> = document.select(&binding_user_title_posts).collect();
-    
-    let title_views: Vec<(String, i32)> = posts.iter().zip(views_values.iter()).map(|(post, views)| {
-        let binding_title: Selector = Selector::parse("a").unwrap();
-        let title: scraper::ElementRef = post.select(&binding_title).next().unwrap();
-        let title_attr: &str = title.value().attr("title").unwrap();
-        (title_attr.to_string(), *views)
-    }).collect();
-    
-    let title_views_map: std::collections::HashMap<String, i32> = title_views.into_iter().collect();
-    
-    let mut following_count: scraper::html::Select = document.select(&binding_following_count);
-    let mut followers_count: scraper::html::Select = document.select(&binding_followers_count);
-    let mut likes_count: scraper::html::Select = document.select(&binding_likes_count);
-
-    let following_count_str: String = following_count.next().unwrap().text().collect::<String>();
-    let followers_count_str: String = followers_count.next().unwrap().text().collect::<String>();
-    let likes_count_str: String = likes_count.next().unwrap().text().collect::<String>();
-
-    let following: i32 = parse_count(&following_count_str).round() as i32;
-    let followers: i32 = parse_count(&followers_count_str).round() as i32;
-    let likes: i32 = parse_count(&likes_count_str).round() as i32;
-
-    //create a hashmap with the data
-    let mut data: std::collections::HashMap<&str, String> = std::collections::HashMap::new();
-
-    data.insert("following_count", following.to_string());
-    data.insert("followers_count", followers.to_string());
-    data.insert("likes_count", likes.to_string());
-    data.insert("total_views_count", views_sum.to_string());
-    data.insert("videos", serde_json::to_string(&title_views_map).unwrap());
-
-    println!("{}", serde_json::to_string_pretty(&data).unwrap());
-
+    get_tiktok_data().unwrap();
 }
