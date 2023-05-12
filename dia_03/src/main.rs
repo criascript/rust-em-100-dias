@@ -1,15 +1,13 @@
 pub mod traits;
+pub mod types;
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    io::Write,
-};
+use std::{collections::BTreeMap, io::Write};
 
-use chrono::{DateTime, TimeZone};
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use skyscraper::{html, xpath};
 use traits::{GetFirstNode, ParseJson};
+use types::{UserData, VideoData};
 
 const USERNAME: &str = "criascript";
 
@@ -57,23 +55,17 @@ struct Video {
     create_time: DateTime<chrono::Utc>,
 }
 
-type UserData = HashMap<String, HashMap<String, Value>>;
-
-fn get_videos(user_data: &UserData) -> Option<BTreeMap<String, Video>> {
+fn get_videos(item_module: BTreeMap<String, VideoData>) -> Option<BTreeMap<String, Video>> {
     let mut videos = BTreeMap::new();
-    for (id, video) in user_data.get("ItemModule")? {
-        let video = video.as_object()?;
-        let stats = video.get("stats")?;
+    for (id, video) in item_module {
         videos.insert(
-            id.to_string(),
+            id,
             Video {
-                desc: video.get("desc")?.as_str()?.to_string(),
-                play_count: stats.get("playCount")?.as_i64()?,
-                heart_count: stats.get("diggCount")?.as_i64()?,
-                comment_count: stats.get("commentCount")?.as_i64()?,
-                create_time: chrono::Utc
-                    .timestamp_opt(video.get("createTime")?.as_str()?.parse().ok()?, 0)
-                    .single()?,
+                desc: video.desc,
+                play_count: video.stats.play_count,
+                heart_count: video.stats.digg_count,
+                comment_count: video.stats.comment_count,
+                create_time: video.create_time,
             },
         );
     }
@@ -81,20 +73,15 @@ fn get_videos(user_data: &UserData) -> Option<BTreeMap<String, Video>> {
     Some(videos)
 }
 
-fn parse_user_data(user_data: UserData) -> Option<TikTokData> {
-    let videos = get_videos(&user_data)?;
+fn parse_user_data(mut user_data: UserData) -> Option<TikTokData> {
+    let videos = get_videos(user_data.item_module)?;
 
-    let user_stats = user_data
-        .get("UserModule")?
-        .get("stats")?
-        .as_object()?
-        .get(USERNAME)?
-        .as_object()?;
+    let user_stats = user_data.user_module.stats.remove(USERNAME)?;
 
     Some(TikTokData {
-        following_count: user_stats.get("followingCount")?.as_i64()?,
-        follower_count: user_stats.get("followerCount")?.as_i64()?,
-        like_count: user_stats.get("heartCount")?.as_i64()?,
+        following_count: user_stats.following_count,
+        follower_count: user_stats.follower_count,
+        like_count: user_stats.heart_count,
         play_count: videos.values().map(|v| v.play_count).sum(),
         play_average: videos.values().map(|v| v.play_count).sum::<i64>() as f64
             / videos.len() as f64,
