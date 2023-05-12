@@ -1,13 +1,16 @@
 pub mod traits;
 pub mod types;
 
-use std::{collections::BTreeMap, io::Write};
+use std::{
+    collections::{BTreeMap, HashSet},
+    io::Write,
+};
 
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use skyscraper::{html, xpath};
 use traits::{GetFirstNode, ParseJson};
-use types::{UserData, VideoData};
+use types::{Challenge, UserData, VideoData};
 
 const USERNAME: &str = "criascript";
 
@@ -20,6 +23,7 @@ struct TikTokData {
     play_average: f64,
     comment_count: i64,
     videos: BTreeMap<String, Video>,
+    hashtags_used: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -53,7 +57,12 @@ struct Video {
     heart_count: i64,
     comment_count: i64,
     create_time: DateTime<chrono::Utc>,
+    cover: String,
+    challenges: Vec<Challenge>,
 }
+
+//todo: use hashtag search to get more data
+// https://www.tiktok.com/tag/hashtagname?lang=pt-BR
 
 fn get_videos(item_module: BTreeMap<String, VideoData>) -> Option<BTreeMap<String, Video>> {
     let mut videos = BTreeMap::new();
@@ -66,6 +75,8 @@ fn get_videos(item_module: BTreeMap<String, VideoData>) -> Option<BTreeMap<Strin
                 heart_count: video.stats.digg_count,
                 comment_count: video.stats.comment_count,
                 create_time: video.create_time,
+                cover: video.video.cover,
+                challenges: video.challenges,
             },
         );
     }
@@ -77,18 +88,38 @@ fn parse_user_data(mut user_data: UserData) -> Option<TikTokData> {
     let videos = get_videos(user_data.item_module)?;
 
     let user_stats = user_data.user_module.stats.remove(USERNAME)?;
+    let play_average =
+        videos.values().map(|v| v.play_count).sum::<i64>() as f64 / videos.len() as f64;
+    let play_count = videos.values().map(|v| v.play_count).sum();
+    let comment_count = videos.values().map(|v| v.comment_count).sum();
+
+    let hashtags_used = videos
+        .values()
+        .flat_map(|v| v.challenges.clone())
+        .map(|c| c.title)
+        .collect::<Vec<_>>();
+
+    let unique_hashtags: HashSet<String> = hashtags_used.into_iter().collect();
+    let mut hashtags_used: Vec<String> = unique_hashtags.into_iter().collect();
+    hashtags_used.sort();
+
+    // get_hashtag_data(hashtags_used);
 
     Some(TikTokData {
         following_count: user_stats.following_count,
         follower_count: user_stats.follower_count,
         like_count: user_stats.heart_count,
-        play_count: videos.values().map(|v| v.play_count).sum(),
-        play_average: videos.values().map(|v| v.play_count).sum::<i64>() as f64
-            / videos.len() as f64,
-        comment_count: videos.values().map(|v| v.comment_count).sum(),
+        play_count,
+        play_average,
+        comment_count,
         videos,
+        hashtags_used,
     })
 }
+
+// fn parse_hashtag_data(mut user_data: UserData) -> Option<TikTokData> {
+//     None
+// }
 
 fn get_tiktok_data() -> Result<(), TikTokError> {
     let url: String = format!("https://www.tiktok.com/@{USERNAME}?lang=pt-BR");
@@ -107,6 +138,27 @@ fn get_tiktok_data() -> Result<(), TikTokError> {
 
     std::fs::File::create("data.json")?
         .write_all(serde_json::to_string_pretty(&tiktok_data)?.as_bytes())?;
+    Ok(())
+}
+
+fn get_hashtag_data(data: Vec<String>) -> Result<(), TikTokError> {
+    let mut hashtags_data: Vec<_> = Vec::new();
+
+    for hashtag in data {
+        let url: String = format!("https://www.tiktok.com/tag/{hashtag}?lang=pt-BR");
+        let response: String = reqwest::blocking::get(url)?.text()?;
+        let doc = html::parse(&response)?;
+        hashtags_data.push(
+            xpath::parse(r#"//script[@id="SIGI_STATE"]"#)?
+                .get_first_text(&doc)
+                .ok_or_else(|| TikTokError::Custom("no data found".to_string()))?
+                .parse_json()?,
+        );
+
+        std::fs::File::create("raw_hashtags.json")?
+            .write_all(serde_json::to_string_pretty(&hashtags_data)?.as_bytes())?;
+    }
+
     Ok(())
 }
 

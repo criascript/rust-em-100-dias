@@ -791,15 +791,7 @@ pub struct Music {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Challenge {
-    pub id: String,
     pub title: String,
-    pub desc: String,
-    pub profile_larger: String,
-    pub profile_medium: String,
-    pub profile_thumb: String,
-    pub cover_larger: String,
-    pub cover_medium: String,
-    pub cover_thumb: String,
     pub is_commerce: bool,
     pub stats: ChallengeStats,
 }
